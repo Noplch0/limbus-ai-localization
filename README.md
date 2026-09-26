@@ -4,7 +4,7 @@
 
 使用 BYOK 自动翻译边狱巴士未汉化的内容。仅依赖 Python 3.10+ 标准库，无需安装任何第三方包。
 
-本项目的使用需要安装[零协汉化组](https://github.com/LocalizeLimbusCompany/LocalizeLimbusCompany)最新汉化，脚本会自动读取未汉化内容进行 AI 翻译（不安装也行，那就是翻译整个游戏文本，Token 杀手）。
+本项目的使用需要安装[零协汉化组](https://www.zeroasso.top/)最新汉化，脚本会自动读取未汉化内容进行 AI 翻译（不安装也行，那就是翻译整个游戏文本，Token 杀手）。
 
 ## 使用方式（普通玩家）
 
@@ -125,11 +125,11 @@ Ctrl+C 会立即保存已完成的缓存并退出；重跑自动续翻。
 
 ## 免责声明
 
-本项目与 Project Moon 及零协汉化组（LLC）无关；AI 译文非官方翻译，可能存在误译，仅供交流学习，请支持官方与零协的正式翻译。
+本项目与 Project Moon 及都市零协会汉化组无关；AI 译文非官方翻译且未经人工校对，可能存在误译、漏译等问题，本项目仅供交流学习。
 
 ## 致谢
 
-本项目的翻译基线、合并来源与官方译名参照均来自零协汉化组（LocalizeLimbusCompany）的辛勤产出，没有他们的汉化就没有本工具：
+本项目的翻译基线、合并来源与官方译名参照均来自**都市零协会汉化组 | Localize Limbus Company**的辛勤产出，没有他们的汉化就没有本工具：
 
 - GitHub：[LocalizeLimbusCompany/LocalizeLimbusCompany](https://github.com/LocalizeLimbusCompany/LocalizeLimbusCompany)
 - 官网：[zeroasso.top](https://www.zeroasso.top/)
