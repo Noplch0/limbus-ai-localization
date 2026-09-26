@@ -1,0 +1,23 @@
+# 含 API 密钥,勿提交
+config.json
+
+# 运行产物
+cache/
+logs/
+untranslated/
+dist/
+__pycache__/
+*.pyc
+*.pyo
+
+# 本地编辑器 / 审计临时文件
+.zcode/
+_audit_tmp.py
+_audit_out.json
+_verify_fix.py
+_verify_out.json
+
+# 系统杂项
+Thumbs.db
+.DS_Store
+desktop.ini
