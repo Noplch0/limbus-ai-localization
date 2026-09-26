@@ -4,7 +4,7 @@
 
 使用 BYOK 自动翻译边狱巴士未汉化的内容。仅依赖 Python 3.10+ 标准库，无需安装任何第三方包。
 
-本项目的使用需要安装零协会最新汉化，脚本会自动读取未汉化内容进行 AI 翻译（不安装也行，那就是翻译整个游戏文本，Token 杀手）。
+本项目的使用需要安装[零协汉化组](https://github.com/LocalizeLimbusCompany/LocalizeLimbusCompany)最新汉化，脚本会自动读取未汉化内容进行 AI 翻译（不安装也行，那就是翻译整个游戏文本，Token 杀手）。
 
 ## 使用方式（普通玩家）
 
@@ -22,6 +22,8 @@
 压缩包内附《使用说明.txt》，内容与本节一致。
 
 ## 从源代码运行
+
+> 请确保您在自运行时已安装零协最新版本汉化补丁，或清楚你在进行全额汉化——汉化文件缺失会造成模型用量大幅上升。
 
 本项目 release 使用 deepseek-v4.1-flash 进行翻译，如果你想用其他模型翻译可参考下方运行方式，使用 OpenAI 兼容格式。
 
@@ -124,3 +126,10 @@ Ctrl+C 会立即保存已完成的缓存并退出；重跑自动续翻。
 ## 免责声明
 
 本项目与 Project Moon 及零协汉化组（LLC）无关；AI 译文非官方翻译，可能存在误译，仅供交流学习，请支持官方与零协的正式翻译。
+
+## 致谢
+
+本项目的翻译基线、合并来源与官方译名参照均来自零协汉化组（LocalizeLimbusCompany）的辛勤产出，没有他们的汉化就没有本工具：
+
+- GitHub：[LocalizeLimbusCompany/LocalizeLimbusCompany](https://github.com/LocalizeLimbusCompany/LocalizeLimbusCompany)
+- 官网：[zeroasso.top](https://www.zeroasso.top/)
