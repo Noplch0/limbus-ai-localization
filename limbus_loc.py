@@ -675,6 +675,9 @@ def call_llm(api: dict, messages: list, json_mode: bool) -> str:
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {api['api_key']}",
+                # 部分 API 中转站套了 Cloudflare,默认的 Python-urllib UA 会被
+                # 按"浏览器签名"拦截(HTTP 403 error 1010),必须带常规 UA
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
             },
             method="POST",
         )
