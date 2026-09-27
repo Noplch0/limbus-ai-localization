@@ -8,7 +8,7 @@
 
 ## 使用方式（普通玩家）
 
-从 [Release](https://github.com/Noplch0/limbus-ai-localization/releases) 页下载最新版本的压缩包：
+从 [Release](https://github.com/Noplch0/limbus-ai-localization/releases/latest) 页下载最新版本的压缩包：
 
 1. 解压到 `<你的游戏目录>\LimbusCompany_Data\Lang\<你命名的文件夹>` 中
    （zip 根目录就是语言包内容，直接解压即可，无需再建子文件夹）；

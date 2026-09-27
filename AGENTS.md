@@ -15,7 +15,8 @@
 - 一键流程: `python limbus_loc.py run`(scan + translate + 自动合并零协包)
 - 打包分发: `python limbus_loc.py pack [--out 路径]`(输出 dist/*.zip;
   zip 根目录即语言包内容,附《使用说明.txt》,发布用 `gh release create` 附上 zip;
-  **Release 版本号一律用 YYYYMMDD 日期**,如 20260927,不用 v1.x)
+  **Release 版本号一律用 YYYYMMDD 日期**(如 20260927),不用 v1.x,
+  **标题只写日期本身**(如 `gh release edit 20260927 --title 20260927`),不加前置名称)
 - 无 pip install;正式翻译前先 `--dry-run` 估算批次与费用
 
 ## 项目布局
