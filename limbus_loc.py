@@ -327,6 +327,17 @@ def file_is_stale(kr_data, zh_data) -> bool:
     return bool(extra)
 
 
+def contains_hangul(obj) -> bool:
+    """JSON 中是否存在任何韩文字符串值;全无韩文的源文件(空壳)没有可翻译内容。"""
+    if isinstance(obj, str):
+        return bool(HANGUL_RE.search(obj))
+    if isinstance(obj, dict):
+        return any(contains_hangul(v) for v in obj.values())
+    if isinstance(obj, list):
+        return any(contains_hangul(v) for v in obj)
+    return False
+
+
 def overlay_prefer_official(base, official):
     """按韩文结构走,官方已有且不含韩文的字符串优先,其余保留 base(AI/原文)。"""
     if isinstance(base, str):
@@ -472,23 +483,33 @@ def cmd_scan(cfg: dict) -> int:
 
     missing = []
     stale = []
+    empty = 0
     total = 0
     for kr_file in sorted(kr_dir.rglob("KR_*.json")):
         total += 1
         rel = kr_file.relative_to(kr_dir)
         zh_rel = kr_to_zh_rel(rel)
-        if zh_dir is None:
-            missing.append((kr_file, zh_rel, "missing"))
-            continue
-        zh_file = zh_dir / zh_rel
-        if not zh_file.exists():
-            missing.append((kr_file, zh_rel, "missing"))
+        zh_file = zh_dir / zh_rel if zh_dir is not None else None
+        kind = None
+        if zh_file is None or not zh_file.exists():
+            kind = "missing"
+        else:
+            try:
+                if file_is_stale(_read_json(kr_file), _read_json(zh_file)):
+                    kind = "stale"
+            except Exception:
+                kind = None
+        if kind is None:
             continue
         try:
-            if file_is_stale(_read_json(kr_file), _read_json(zh_file)):
-                stale.append((kr_file, zh_rel, "stale"))
+            kr_data = _read_json(kr_file)
         except Exception:
+            kr_data = None
+        if kr_data is not None and not contains_hangul(kr_data):
+            # 韩文源里没有任何韩文字符串(如空 dataList 壳文件),没有可翻译内容
+            empty += 1
             continue
+        (missing if kind == "missing" else stale).append((kr_file, zh_rel, kind))
 
     to_copy = missing + stale
     UNTRANSLATED_DIR.mkdir(exist_ok=True)
@@ -507,6 +528,12 @@ def cmd_scan(cfg: dict) -> int:
             if not kr_src.is_file():
                 pruned.append(rel)
                 continue
+            try:
+                if not contains_hangul(_read_json(kr_src)):
+                    pruned.append(rel)
+                    continue
+            except Exception:
+                pass
             if zh_dir is not None and (zh_dir / rel).is_file():
                 try:
                     stale_now = file_is_stale(_read_json(kr_src), _read_json(zh_dir / rel))
@@ -530,6 +557,7 @@ def cmd_scan(cfg: dict) -> int:
         "total_kr_files": total,
         "missing_count": len(missing),
         "stale_count": len(stale),
+        "empty_count": empty,
         "pruned_count": len(pruned),
         "missing": sorted(str(zh_rel) for _, zh_rel, _ in missing),
         "stale": sorted(str(zh_rel) for _, zh_rel, _ in stale),
@@ -550,8 +578,10 @@ def cmd_scan(cfg: dict) -> int:
         f"韩文文件共 {total} 个,无中文对应 {len(missing)} 个,"
         f"官方包内容落后 {len(stale)} 个,已复制到 ./untranslated/:"
     )
+    if empty:
+        print(f"  [跳过] {empty} 个韩文源文件不含任何韩文字符串(空壳文件),未纳入语料")
     if pruned:
-        print(f"  [清理] {len(pruned)} 个文件已被官方包完整覆盖/源已删除,移出 untranslated/")
+        print(f"  [清理] {len(pruned)} 个文件已被官方包完整覆盖/源已删除/源无韩文,移出 untranslated/")
     if missing:
         print("  [缺失]")
         for d, n in sorted(by_dir(missing).items()):
@@ -1386,8 +1416,8 @@ HELP_COMMANDS: dict[str, dict] = {
         "desc": "对比游戏韩文资源(kr/)与零协中文包(LLC_zh-CN),把缺失或内容落后"
                 "(缺 id/key)的 KR_ 文件复制到 ./untranslated/(未安装零协包时全部"
                 " KR_ 文件视为缺失,整包送翻);同时从零协包抽取 NPC/名称译名到"
-                " cache/glossary_official.json。零协已补齐或源已删除的文件会自动"
-                "移出语料目录。",
+                " cache/glossary_official.json。零协已补齐、源已删除或源中无任何"
+                "韩文(空壳文件)的条目会自动移出语料目录。",
         "options": [],
         "example": "python limbus_loc.py scan",
     },
