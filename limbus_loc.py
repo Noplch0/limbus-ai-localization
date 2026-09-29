@@ -1126,7 +1126,15 @@ def cmd_translate(cfg: dict, args) -> int:
         if not files:
             raise FatalError(f"untranslated/ 下没有匹配 “{args.file}” 的文件,请先运行 scan。")
     if not files:
-        raise FatalError("untranslated/ 目录为空,请先运行:python limbus_loc.py scan")
+        # 语料为空是常态(零协已全部覆盖/源为空壳):不视为错误,仍执行官方包合并收尾
+        print("untranslated/ 目录为空:没有待翻译内容(零协已全部覆盖,或源文件无韩文)。")
+        if cfg.get("merge_official", True):
+            added, overwritten, unchanged, overlaid = merge_official_pack(cfg)
+            print(
+                f"官方包合并:ai/ 新增 {added} 个文件,以官方版覆盖 {overwritten} 个,"
+                f"落后条目叠加 {overlaid} 个,已一致 {unchanged} 个(LLC_zh-CN 只读未动)。"
+            )
+        return 0
 
     jobs = collect_jobs(files, whitelist, user_glossary, zh_dir)
 
