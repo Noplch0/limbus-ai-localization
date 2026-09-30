@@ -686,7 +686,8 @@ def build_system_prompt(glossary: dict) -> str:
     return "\n".join(lines)
 
 
-def call_llm(api: dict, messages: list, json_mode: bool) -> str:
+def call_llm(api: dict, messages: list, json_mode: bool) -> tuple[str, dict]:
+    """调用一次接口,返回 (回复文本, usage token 统计字典,可能为空)。"""
     url = api["base_url"].rstrip("/") + "/chat/completions"
     payload = {
         "model": api["model"],
@@ -698,7 +699,7 @@ def call_llm(api: dict, messages: list, json_mode: bool) -> str:
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
 
-    def post(pl: dict) -> str:
+    def post(pl: dict) -> tuple[str, dict]:
         req = urllib.request.Request(
             url,
             data=json.dumps(pl, ensure_ascii=False).encode("utf-8"),
@@ -713,7 +714,9 @@ def call_llm(api: dict, messages: list, json_mode: bool) -> str:
         )
         with urllib.request.urlopen(req, timeout=api["timeout"]) as resp:
             body = json.loads(resp.read().decode("utf-8"))
-        return body["choices"][0]["message"]["content"]
+        content = body["choices"][0]["message"]["content"]
+        usage = body.get("usage") or {}
+        return content, usage
 
     try:
         return post(payload)
@@ -802,7 +805,11 @@ def request_translation(ctx: types.SimpleNamespace, items: list[Item],
         if ctx.stop.is_set():
             return None
         try:
-            content = call_llm(ctx.api, messages, ctx.api["json_mode"])
+            content, usage = call_llm(ctx.api, messages, ctx.api["json_mode"])
+            if usage:
+                with ctx.lock:
+                    ctx.tokens["prompt"] += usage.get("prompt_tokens") or 0
+                    ctx.tokens["completion"] += usage.get("completion_tokens") or 0
             arr = extract_translations(content, len(srcs))
             if arr is not None:
                 return arr
@@ -893,7 +900,7 @@ def cmd_test(cfg: dict) -> int:
     print(f"发送测试请求(json_mode={api['json_mode']})...")
     started = time.time()
     try:
-        content = call_llm(api, messages, api["json_mode"])
+        content, usage = call_llm(api, messages, api["json_mode"])
     except FatalError as e:
         print(f"[失败] {e}")
         return 1
@@ -932,6 +939,10 @@ def cmd_test(cfg: dict) -> int:
         print("       若持续出现,可在 config.json 将 api.json_mode 设为 false。")
         return 1
     print(f"[成功] 连接正常,耗时 {elapsed:.2f} 秒。")
+    if usage:
+        print(f"       本次 Token:输入 {usage.get('prompt_tokens', '?')} / "
+              f"输出 {usage.get('completion_tokens', '?')} / "
+              f"合计 {usage.get('total_tokens', '?')}")
     print(f"       测试翻译:{src} → {arr[0]}")
     return 0
 
@@ -1152,6 +1163,7 @@ def cmd_translate(cfg: dict, args) -> int:
         stop=threading.Event(),
         failures=[],
         new_cache=0,
+        tokens={"prompt": 0, "completion": 0},
         user_glossary=user_glossary,
         full_glossary=full_glossary,
         warn=lambda msg: print(f"[警告] {msg}"),
@@ -1228,22 +1240,77 @@ def cmd_translate(cfg: dict, args) -> int:
     done_batches = 0
     applied = 0
     files_done = 0
+    last_file = {"name": ""}
     ai_dir.mkdir(parents=True, exist_ok=True)
 
-    def progress_line() -> None:
-        print(
-            f"\r进度:文件 {files_done}/{len(jobs)} | 批次 {done_batches}/{len(batches)} | "
-            f"文本 {applied}/{len(pending_items)} 条 | 回退 {len(ctx.failures)} | "
-            f"用时 {time.time() - started:.0f} 秒   ",
-            end="", flush=True,
-        )
+    use_ansi = sys.stdout.isatty()
+    if os.name == "nt":
+        os.system("")  # 让旧版 Windows 控制台启用 ANSI 转义支持
+
+    def fmt_tokens(n: float) -> str:
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.2f}M"
+        if n >= 1_000:
+            return f"{n / 1_000:.1f}K"
+        return str(int(n))
+
+    def fmt_secs(s: float) -> str:
+        s = int(s)
+        h, r = divmod(s, 3600)
+        m, sec = divmod(r, 60)
+        return f"{h:d}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}"
+
+    DISP_LINES = 4
+    disp_state = {"first": True}
+
+    def render_block() -> None:
+        """把固定 4 行进度块原位重画(ANSI);非终端时退化为单行进度。"""
+        elapsed = time.time() - started
+        tok_p = ctx.tokens["prompt"]
+        tok_c = ctx.tokens["completion"]
+        if done_batches and done_batches < len(batches):
+            eta = elapsed / done_batches * (len(batches) - done_batches)
+            eta_s = f" | 剩余约 {fmt_secs(eta)}"
+        else:
+            eta_s = ""
+        last = f" | 最近 {last_file['name']}" if last_file["name"] else ""
+        lines = [
+            f"[边狱巴士 AI 汉化] 模型 {cfg['api']['model']} | 回退 {len(ctx.failures)}",
+            f"文件 {files_done}/{len(jobs)} | 批次 {done_batches}/{len(batches)} | "
+            f"文本 {applied}/{len(pending_items)} 条",
+            f"Token 输入 {fmt_tokens(tok_p)} / 输出 {fmt_tokens(tok_c)} / "
+            f"合计 {fmt_tokens(tok_p + tok_c)}",
+            f"用时 {fmt_secs(elapsed)}{eta_s}{last}",
+        ]
+        if use_ansi:
+            out = []
+            if not disp_state["first"]:
+                out.append(f"\x1b[{DISP_LINES - 1}A")
+            for i, ln in enumerate(lines):
+                out.append("\r\x1b[K" + ln + ("\n" if i < DISP_LINES - 1 else ""))
+            print("".join(out), end="", flush=True)
+            disp_state["first"] = False
+        else:
+            print(
+                f"\r进度:文件 {files_done}/{len(jobs)} | 批次 {done_batches}/{len(batches)} | "
+                f"文本 {applied}/{len(pending_items)} 条 | "
+                f"Token {fmt_tokens(tok_p + tok_c)} | 用时 {fmt_secs(elapsed)}   ",
+                end="", flush=True,
+            )
 
     def finish_job(job: Job) -> None:
         nonlocal files_done
         write_job(ai_dir, job)
         job.written = True
         files_done += 1
-        print(f"\n[完成 {files_done}/{len(jobs)}] {job.rel}({len(job.items)} 条)")
+        last_file["name"] = f"{job.rel}({len(job.items)} 条)"
+
+    stop_disp = threading.Event()
+
+    def disp_loop() -> None:
+        # 每 0.5 秒原位重画一次:用时实时跳动,计数/Token 有新进度即刷新
+        while not stop_disp.wait(0.5):
+            render_block()
 
     def apply_and_maybe_write(batch: list[Item], results: dict) -> None:
         nonlocal applied
@@ -1271,13 +1338,17 @@ def cmd_translate(cfg: dict, args) -> int:
     if batches:
         ex = concurrent.futures.ThreadPoolExecutor(max_workers=cfg["concurrency"])
         futs = {ex.submit(process_batch, ctx, b): b for b in batches}
+        if use_ansi:
+            render_block()
+            threading.Thread(target=disp_loop, daemon=True, name="progress").start()
         try:
             for fut in concurrent.futures.as_completed(futs):
                 batch = futs[fut]
                 results = fut.result()
                 apply_and_maybe_write(batch, results)
                 done_batches += 1
-                progress_line()
+                if not use_ansi:
+                    render_block()
                 if ctx.new_cache:
                     save_cache(cache)
         except KeyboardInterrupt:
@@ -1286,16 +1357,23 @@ def cmd_translate(cfg: dict, args) -> int:
             ctx.stop.set()
             with ctx.lock:
                 save_cache(cache)
+            stop_disp.set()
             ex.shutdown(wait=False, cancel_futures=True)
             print(f"\n[失败] {e}")
             return 1
-        else:
+        finally:
+            stop_disp.set()
             ex.shutdown(wait=True)
-        print()
+        if use_ansi:
+            render_block()
+            print()
     # 全部命中缓存或无待译条目的文件不会经过批次循环,这里统一收尾写出
     for job in jobs:
         if not job.written:
             finish_job(job)
+    if use_ansi:
+        render_block()
+        print()
 
     if ctx.new_cache or dropped or exact_saved:
         save_cache(cache)
@@ -1323,6 +1401,11 @@ def cmd_translate(cfg: dict, args) -> int:
         "glossary_exact_hits": exact_hits,
         "newly_translated": ctx.new_cache,
         "fallback": len(ctx.failures),
+        "tokens": {
+            "prompt": ctx.tokens["prompt"],
+            "completion": ctx.tokens["completion"],
+            "total": ctx.tokens["prompt"] + ctx.tokens["completion"],
+        },
         "elapsed_sec": round(time.time() - started, 1),
         "files_detail": {
             str(j.rel): {
@@ -1542,6 +1625,8 @@ def main(argv=None) -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
+    if os.name == "nt":
+        os.system("")  # 启用 Windows 控制台的 ANSI 转义支持(进度块刷新用)
     args = parse_args(argv)
     try:
         if args.command == "help":
