@@ -7,7 +7,8 @@
     "temperature": 1.0,
     "max_tokens": null,
     "json_mode": true,
-    "timeout": 120
+    "timeout": 120,
+    "reasoning_effort": "high"
   },
   "concurrency": 4,
   "batch_max_strings": 30,

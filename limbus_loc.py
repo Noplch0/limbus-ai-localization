@@ -100,6 +100,8 @@ DEFAULTS = {
         "max_tokens": None,
         "json_mode": True,
         "timeout": 120,
+        # 思考强度:max/xhigh/high/medium/low,留空则不发送该参数
+        "reasoning_effort": "",
     },
     "concurrency": 4,
     "batch_max_strings": 30,
@@ -107,6 +109,8 @@ DEFAULTS = {
     "max_retries": 3,
     "merge_official": True,
 }
+
+REASONING_EFFORT_LEVELS = ("max", "xhigh", "high", "medium", "low")
 
 
 class FatalError(Exception):
@@ -698,6 +702,9 @@ def call_llm(api: dict, messages: list, json_mode: bool) -> tuple[str, dict]:
         payload["max_tokens"] = api["max_tokens"]
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
+    effort = str(api.get("reasoning_effort") or "").strip().lower()
+    if effort:
+        payload["reasoning_effort"] = effort
 
     def post(pl: dict) -> tuple[str, dict]:
         req = urllib.request.Request(
@@ -887,6 +894,8 @@ def cmd_test(cfg: dict) -> int:
     key = api.get("api_key")
     print(f"base_url: {api['base_url']}")
     print(f"model:    {api['model']}")
+    effort = str(api.get("reasoning_effort") or "").strip().lower()
+    print(f"思考强度: {effort if effort else '(未设置,使用模型默认)'}")
     if key:
         print(f"api_key:  {key[:6]}***{key[-4:]}" if len(key) > 12 else "api_key:  (已设置)")
     else:
@@ -1636,6 +1645,12 @@ def main(argv=None) -> int:
         if args.command == "help":
             return cmd_help(args)
         cfg = load_config()
+        effort = str(cfg["api"].get("reasoning_effort") or "").strip().lower()
+        if effort and effort not in REASONING_EFFORT_LEVELS:
+            raise FatalError(
+                f"api.reasoning_effort 无效:{effort!r}"
+                f"(可选 {'/'.join(REASONING_EFFORT_LEVELS)},留空则不发送该参数)"
+            )
         if args.command == "scan":
             return cmd_scan(cfg)
         if args.command == "test":

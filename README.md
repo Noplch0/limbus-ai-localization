@@ -33,11 +33,14 @@
    "api": {
      "base_url": "https://api.deepseek.com/v1",
      "api_key": "sk-...",
-     "model": "deepseek-v4.1-flash"
+     "model": "deepseek-v4.1-flash",
+     "reasoning_effort": "high"
    }
    ```
 
    任何 OpenAI 兼容服务均可（DeepSeek、OpenRouter、硅基流动、本地 Ollama 等），`base_url` 填到 `/v1` 这一级。密钥也可以不改文件，改用环境变量 `LIMBUS_LLM_KEY`。
+
+   **思考强度**：`reasoning_effort` 可选 `max` / `xhigh` / `high` / `medium` / `low`，让模型按指定强度思考（强度越高译文越稳，耗时与 Token 也越多）；留空则不发送该参数、使用模型默认行为。端点不支持该参数时报 400/422 的话，删掉这一项即可。
 
 2. **测试连通性**：运行 `python limbus_loc.py test` 确认 API 可用。
 
