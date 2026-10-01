@@ -770,6 +770,10 @@ def tags_preserved(src: str, dst: str) -> bool:
     if HANGUL_RE.search(dst):
         return False
     for tag in ANGLE_TAG_RE.findall(src):
+        if HANGUL_RE.search(tag):
+            # 形如 <N사에서…> 的韩文尖括号是思考/独白文本,不是样式标签:
+            # 与韩文方括号同规则,保留括号、允许翻译内部
+            continue
         if tag not in dst:
             return False
     for tag in BRACKET_TAG_RE.findall(src):
