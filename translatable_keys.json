@@ -44,6 +44,8 @@
     "subDesc",
     "prevDesc",
     "openCondition",
+    "openConditionNumber",
+    "rawDesc",
     "chaptertitle"
   ]
 }
