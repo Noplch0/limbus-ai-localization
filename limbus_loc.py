@@ -106,6 +106,8 @@ DEFAULTS = {
     "concurrency": 4,
     "batch_max_strings": 30,
     "batch_max_chars": 2400,
+    # 同文件上下文记忆:每批携带最近 N 对已译内容保持连续性,0=关闭
+    "context_pairs": 8,
     "max_retries": 3,
     "merge_official": True,
 }
@@ -142,6 +144,8 @@ class Job:
         self.pending = 0
         self.written = False
         self.overlaid = False
+        # 同文件滚动记忆:[(韩文, 译文), ...],种子来自官方已译邻句,后续批完成时追加
+        self.memory: list[tuple[str, str]] = []
 
 
 # ---------------------------------------------------------------- 基础设施
@@ -628,12 +632,39 @@ def walk_collect(container, key_hint: str | None, whitelist: set,
             walk_collect(value, key, whitelist, items, unknown, job, user_glossary)
 
 
+def _seed_memory(raw, cur, whitelist: set, limit: int) -> list[tuple[str, str]]:
+    """官方邻句种子:按文档序对齐 overlay 前后的字符串,取首个待翻串之前
+    最近 limit 对"已译对"(当前值无韩文,即零协/官方译文)。"""
+    pairs: list[tuple[str, str]] = []
+
+    def rec(a, b, key):
+        if isinstance(a, dict) and isinstance(b, dict):
+            for k in a:
+                if k in b:
+                    rec(a[k], b[k], k)
+        elif isinstance(a, list) and isinstance(b, list):
+            for x, y in zip(a, b):
+                rec(x, y, key)
+        elif isinstance(a, str) and isinstance(b, str):
+            if key in whitelist and HANGUL_RE.search(a):
+                pairs.append((a, b))
+
+    rec(raw, cur, None)
+    seeds: list[tuple[str, str]] = []
+    for kr, cu in pairs:
+        if HANGUL_RE.search(cu):
+            break  # 遇到第一个仍未翻译的串,种子只取它之前的已译邻句
+        seeds.append((kr, cu))
+    return seeds[-limit:] if limit > 0 else []
+
+
 def collect_jobs(paths: list[Path], whitelist: set, user_glossary: dict,
-                 zh_dir: Path | None) -> list[Job]:
+                 zh_dir: Path | None, context_pairs: int) -> list[Job]:
     jobs = []
     for path in paths:
         job = Job(path.relative_to(UNTRANSLATED_DIR), None, [], {})
-        job.data = json.loads(path.read_text("utf-8-sig"))
+        raw = json.loads(path.read_text("utf-8-sig"))
+        job.data = raw
         if zh_dir is not None:
             zh_file = zh_dir / job.rel
             if zh_file.is_file():
@@ -644,6 +675,8 @@ def collect_jobs(paths: list[Path], whitelist: set, user_glossary: dict,
                 except Exception:
                     pass
         walk_collect(job.data, None, whitelist, job.items, job.unknown, job, user_glossary)
+        if context_pairs > 0:
+            job.memory = _seed_memory(raw, job.data, whitelist, context_pairs)
         jobs.append(job)
     return jobs
 
@@ -800,11 +833,21 @@ def tags_preserved(src: str, dst: str) -> bool:
 
 
 def request_translation(ctx: types.SimpleNamespace, items: list[Item],
-                        system_prompt: str) -> list | None:
+                        system_prompt: str,
+                        memory_lines: list[tuple[str, str]] | None = None) -> list | None:
     """调用一次大模型,返回与 items 等长的译文数组;失败返回 None。"""
     srcs = [it.src for it in items]
+    ctx_block = ""
+    if memory_lines:
+        ctx_block = (
+            "以下是同一文件中已完成翻译的相邻内容(格式:韩文 => 中文),仅供保持"
+            "译文风格、用词与人称的连续性;术语表与占位符/标签规则优先,禁止照抄上下文:\n"
+            + "\n".join(f"- {k} => {v}" for k, v in memory_lines)
+            + "\n\n"
+        )
     user = (
-        "将以下 JSON 数组中的每个韩文字符串翻译为简体中文,"
+        ctx_block
+        + "将以下 JSON 数组中的每个韩文字符串翻译为简体中文,"
         '返回与输入等长且顺序对应的译文数组。输出格式:{"t": ["译文", ...]}。\n'
         + json.dumps(srcs, ensure_ascii=False)
     )
@@ -833,17 +876,22 @@ def request_translation(ctx: types.SimpleNamespace, items: list[Item],
 
 
 def process_batch(ctx: types.SimpleNamespace, batch: list[Item]) -> dict:
-    """翻译一批字符串,返回 {缓存键: 译文或 None(回退原文)}。"""
+    """翻译一批字符串,返回 {缓存键: 译文或 None(回退原文)}。
+
+    批内字符串保证来自同一文件(分批时按文件边界切分),
+    请求携带该文件的滚动翻译记忆以保持上下文连续性。
+    """
     srcs = [it.src for it in batch]
     glo = {**glossary_subset(ctx.full_glossary, srcs), **ctx.user_glossary}
     system_prompt = build_system_prompt(glo)
+    job = batch[0].job
     results: dict[str, str | None] = {}
     bad = list(range(len(batch)))
     attempt = 0
     while bad and attempt <= ctx.cfg["max_retries"] and not ctx.stop.is_set():
         subset = [batch[i] for i in bad]
         try:
-            arr = request_translation(ctx, subset, system_prompt)
+            arr = request_translation(ctx, subset, system_prompt, list(job.memory))
         except FatalError:
             raise
         if arr is None:
@@ -863,7 +911,7 @@ def process_batch(ctx: types.SimpleNamespace, batch: list[Item]) -> dict:
         if ctx.stop.is_set():
             break
         try:
-            arr = request_translation(ctx, [batch[i]], system_prompt)
+            arr = request_translation(ctx, [batch[i]], system_prompt, list(job.memory))
         except FatalError:
             raise
         if arr and tags_preserved(batch[i].src, arr[0]):
@@ -1160,7 +1208,7 @@ def cmd_translate(cfg: dict, args) -> int:
             )
         return 0
 
-    jobs = collect_jobs(files, whitelist, user_glossary, zh_dir)
+    jobs = collect_jobs(files, whitelist, user_glossary, zh_dir, int(cfg["context_pairs"]))
 
     cache = load_cache()
     dropped = scrub_cache(cache, invalidate_contains)
@@ -1216,7 +1264,8 @@ def cmd_translate(cfg: dict, args) -> int:
     chars = 0
     for it in pending_items:
         if cur and (
-            len(cur) >= cfg["batch_max_strings"]
+            cur[0].job is not it.job  # 批不跨文件:同文件上下文记忆的前提
+            or len(cur) >= cfg["batch_max_strings"]
             or chars + len(it.src) > cfg["batch_max_chars"]
         ):
             batches.append(cur)
@@ -1336,6 +1385,18 @@ def cmd_translate(cfg: dict, args) -> int:
                 dup.holder[dup.slot] = value
                 touched[dup.job] = touched.get(dup.job, 0) + 1
             applied += 1
+        # 同文件滚动记忆:完成的 (韩文, 译文) 对喂给该文件后续批次(回退原文的不入记忆)
+        lim = int(cfg["context_pairs"] or 0)
+        if lim:
+            job0 = batch[0].job
+            mem = job0.memory
+            for it in batch:
+                t = results.get(it.ck)
+                if t is not None:
+                    mem.append((it.src, t))
+            del mem[:-lim]
+            while len(mem) > 1 and sum(len(a) + len(b) for a, b in mem) > 1200:
+                del mem[0]
         for job, n in touched.items():
             job.pending -= n
             if job.pending <= 0 and not job.written:

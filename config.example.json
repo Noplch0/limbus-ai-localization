@@ -13,6 +13,7 @@
   "concurrency": 4,
   "batch_max_strings": 30,
   "batch_max_chars": 2400,
+  "context_pairs": 8,
   "max_retries": 3,
   "merge_official": true
 }
