@@ -45,6 +45,7 @@
     "prevDesc",
     "openCondition",
     "openConditionNumber",
+    "relatedChapterText",
     "rawDesc",
     "chaptertitle"
   ]
